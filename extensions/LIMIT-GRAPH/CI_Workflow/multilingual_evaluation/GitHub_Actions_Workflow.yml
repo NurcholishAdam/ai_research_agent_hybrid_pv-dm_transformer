@@ -1,0 +1,409 @@
+name: Multilingual Agent Evaluation
+
+on:
+  pull_request:
+    paths:
+      - 'agents/**'
+      - 'submissions/**'
+      - '**.py'
+  push:
+    branches:
+      - main
+    paths:
+      - 'agents/**'
+      - 'submissions/**'
+  workflow_dispatch:
+    inputs:
+      agent_path:
+        description: 'Path to agent file'
+        required: true
+        type: string
+      agent_name:
+        description: 'Name of the agent'
+        required: false
+        type: string
+      languages:
+        description: 'Languages to test (comma-separated: en,id,ar)'
+        required: false
+        default: 'en,id,ar'
+        type: string
+
+env:
+  PYTHON_VERSION: '3.10'
+  
+jobs:
+  detect-agents:
+    runs-on: ubuntu-latest
+    outputs:
+      agents: ${{ steps.find-agents.outputs.agents }}
+      has-agents: ${{ steps.find-agents.outputs.has-agents }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      
+      - name: Find changed agent files
+        id: find-agents
+        run: |
+          echo "Finding agent files to evaluate..."
+          
+          # Initialize agents array
+          agents="[]"
+          has_agents="false"
+          
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # Manual trigger - use provided agent path
+            agent_path="${{ github.event.inputs.agent_path }}"
+            agent_name="${{ github.event.inputs.agent_name }}"
+            
+            if [ -f "$agent_path" ]; then
+              if [ -z "$agent_name" ]; then
+                agent_name=$(basename "$agent_path" .py)
+              fi
+              agents="[{\"path\":\"$agent_path\",\"name\":\"$agent_name\"}]"
+              has_agents="true"
+              echo "Manual agent: $agent_path"
+            else
+              echo "Error: Agent file not found: $agent_path"
+              exit 1
+            fi
+          else
+            # Automatic trigger - find changed files
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              # Get changed files in PR
+              changed_files=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.sha }})
+            else
+              # Get changed files in push
+              changed_files=$(git diff --name-only HEAD~1 HEAD)
+            fi
+            
+            echo "Changed files:"
+            echo "$changed_files"
+            
+            # Find Python files in agent directories
+            agent_files=""
+            for file in $changed_files; do
+              if [[ "$file" == agents/*.py ]] || [[ "$file" == submissions/*.py ]]; then
+                if [ -f "$file" ]; then
+                  agent_files="$agent_files $file"
+                fi
+              fi
+            done
+            
+            if [ -n "$agent_files" ]; then
+              # Build JSON array of agents
+              agents_json="["
+              first=true
+              for agent_file in $agent_files; do
+                agent_name=$(basename "$agent_file" .py)
+                if [ "$first" = true ]; then
+                  first=false
+                else
+                  agents_json="$agents_json,"
+                fi
+                agents_json="$agents_json{\"path\":\"$agent_file\",\"name\":\"$agent_name\"}"
+              done
+              agents_json="$agents_json]"
+              
+              agents="$agents_json"
+              has_agents="true"
+              echo "Found agent files: $agent_files"
+            else
+              echo "No agent files found in changes"
+            fi
+          fi
+          
+          echo "agents=$agents" >> $GITHUB_OUTPUT
+          echo "has-agents=$has_agents" >> $GITHUB_OUTPUT
+          echo "Final agents JSON: $agents"
+
+  evaluate-agents:
+    needs: detect-agents
+    if: needs.detect-agents.outputs.has-agents == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        agent: ${{ fromJson(needs.detect-agents.outputs.agents) }}
+      fail-fast: false
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Cache pip dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          
+          # Install core dependencies
+          pip install numpy pandas scikit-learn matplotlib seaborn
+          pip install transformers torch
+          pip install nltk spacy
+          
+          # Install project requirements if available
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+          
+          # Install additional multilingual dependencies
+          pip install sentence-transformers
+          pip install langdetect
+          
+          # Download spaCy models
+          python -m spacy download en_core_web_sm || true
+          python -m spacy download xx_core_web_sm || true
+      
+      - name: Prepare evaluation environment
+        run: |
+          echo "Setting up evaluation environment for ${{ matrix.agent.name }}"
+          
+          # Create results directory
+          mkdir -p evaluation_results
+          
+          # Set environment variables
+          echo "AGENT_NAME=${{ matrix.agent.name }}" >> $GITHUB_ENV
+          echo "AGENT_PATH=${{ matrix.agent.path }}" >> $GITHUB_ENV
+          
+          # Parse languages from input or use default
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            languages="${{ github.event.inputs.languages }}"
+          else
+            languages="en,id,ar"
+          fi
+          echo "LANGUAGES=$languages" >> $GITHUB_ENV
+          
+          # Set quality thresholds
+          echo "MIN_OVERALL_SCORE=0.6" >> $GITHUB_ENV
+          echo "MIN_ACCURACY=0.7" >> $GITHUB_ENV
+          echo "MIN_SEMANTIC_SCORE=0.6" >> $GITHUB_ENV
+          echo "MAX_ERROR_RATE=0.2" >> $GITHUB_ENV
+      
+      - name: Validate agent file
+        run: |
+          echo "Validating agent file: ${{ matrix.agent.path }}"
+          
+          if [ ! -f "${{ matrix.agent.path }}" ]; then
+            echo "❌ Agent file not found: ${{ matrix.agent.path }}"
+            exit 1
+          fi
+          
+          # Basic Python syntax check
+          python -m py_compile "${{ matrix.agent.path }}"
+          
+          echo "✅ Agent file validation passed"
+      
+      - name: Run multilingual evaluation
+        id: evaluation
+        run: |
+          echo "🚀 Starting multilingual evaluation for ${{ matrix.agent.name }}"
+          
+          cd extensions/LIMIT-GRAPH/CI_Workflow/multilingual_evaluation
+          
+          # Run CI Hook Script
+          python CI_Hook_Script.py \
+            "${{ github.workspace }}/${{ matrix.agent.path }}" \
+            --agent-name "${{ matrix.agent.name }}" \
+            --config ci_config.json
+          
+          evaluation_status=$?
+          
+          if [ $evaluation_status -eq 0 ]; then
+            echo "✅ Evaluation PASSED for ${{ matrix.agent.name }}"
+            echo "evaluation-passed=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Evaluation FAILED for ${{ matrix.agent.name }}"
+            echo "evaluation-passed=false" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "evaluation-status=$evaluation_status" >> $GITHUB_OUTPUT
+      
+      - name: Upload evaluation results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: evaluation-results-${{ matrix.agent.name }}
+          path: |
+            extensions/LIMIT-GRAPH/CI_Workflow/multilingual_evaluation/evaluation_results/
+            extensions/LIMIT-GRAPH/CI_Workflow/multilingual_evaluation/ci_evaluation.log
+            extensions/LIMIT-GRAPH/CI_Workflow/multilingual_evaluation/leaderboard.json
+          retention-days: 30
+      
+      - name: Comment on PR
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            
+            const agentName = '${{ matrix.agent.name }}';
+            const evaluationPassed = '${{ steps.evaluation.outputs.evaluation-passed }}' === 'true';
+            const evaluationStatus = '${{ steps.evaluation.outputs.evaluation-status }}';
+            
+            // Try to read evaluation results
+            let evaluationSummary = '';
+            try {
+              const resultsDir = 'extensions/LIMIT-GRAPH/CI_Workflow/multilingual_evaluation/evaluation_results';
+              const files = fs.readdirSync(resultsDir);
+              const reportFile = files.find(f => f.includes(agentName) && f.endsWith('_report.md'));
+              
+              if (reportFile) {
+                const reportPath = path.join(resultsDir, reportFile);
+                evaluationSummary = fs.readFileSync(reportPath, 'utf8');
+              }
+            } catch (error) {
+              console.log('Could not read evaluation results:', error.message);
+            }
+            
+            const status = evaluationPassed ? '✅ PASSED' : '❌ FAILED';
+            const emoji = evaluationPassed ? '🎉' : '⚠️';
+            
+            let comment = `## ${emoji} Multilingual Agent Evaluation Results\n\n`;
+            comment += `**Agent:** \`${agentName}\`\n`;
+            comment += `**Status:** ${status}\n`;
+            comment += `**Evaluation Exit Code:** ${evaluationStatus}\n\n`;
+            
+            if (evaluationSummary) {
+              comment += '### Detailed Results\n\n';
+              comment += evaluationSummary;
+            } else {
+              comment += '### Summary\n\n';
+              if (evaluationPassed) {
+                comment += '✅ All quality checks passed\n';
+                comment += '✅ Multilingual performance meets requirements\n';
+                comment += '✅ Agent is ready for integration\n';
+              } else {
+                comment += '❌ Some quality checks failed\n';
+                comment += '❌ Please review the evaluation logs\n';
+                comment += '❌ Agent needs improvements before integration\n';
+              }
+            }
+            
+            comment += '\n---\n';
+            comment += `*Evaluation completed at ${new Date().toISOString()}*\n`;
+            comment += '*View detailed results in the workflow artifacts*';
+            
+            // Post comment
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+      
+      - name: Update leaderboard
+        if: steps.evaluation.outputs.evaluation-passed == 'true' && github.ref == 'refs/heads/main'
+        run: |
+          echo "📊 Updating leaderboard for successful agent: ${{ matrix.agent.name }}"
+          
+          # The leaderboard is already updated by the CI Hook Script
+          # This step is for additional processing if needed
+          
+          cd extensions/LIMIT-GRAPH/CI_Workflow/multilingual_evaluation
+          
+          if [ -f leaderboard.json ]; then
+            echo "Current leaderboard top 3:"
+            python -c "
+            import json
+            with open('leaderboard.json', 'r') as f:
+                leaderboard = json.load(f)
+            for i, entry in enumerate(leaderboard[:3]):
+                print(f'{i+1}. {entry[\"agent_name\"]}: {entry[\"overall_score\"]:.3f}')
+            "
+          fi
+      
+      - name: Fail job if evaluation failed
+        if: steps.evaluation.outputs.evaluation-passed == 'false'
+        run: |
+          echo "💥 Evaluation failed for ${{ matrix.agent.name }}"
+          echo "Please check the evaluation logs and fix the issues"
+          exit 1
+
+  evaluation-summary:
+    needs: [detect-agents, evaluate-agents]
+    if: always() && needs.detect-agents.outputs.has-agents == 'true'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Generate evaluation summary
+        run: |
+          echo "## 🌍 Multilingual Agent Evaluation Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Evaluation Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
+          echo "**Trigger:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Count results
+          total_agents=$(echo '${{ needs.detect-agents.outputs.agents }}' | jq length)
+          echo "**Total Agents Evaluated:** $total_agents" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### Languages Tested" >> $GITHUB_STEP_SUMMARY
+          echo "- 🇺🇸 English (EN)" >> $GITHUB_STEP_SUMMARY
+          echo "- 🇮🇩 Indonesian (ID)" >> $GITHUB_STEP_SUMMARY
+          echo "- 🇸🇦 Arabic (AR) - RTL Support" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### Evaluation Dimensions" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Accuracy and Semantic Understanding" >> $GITHUB_STEP_SUMMARY
+          echo "- 🛡️ Distractor Resistance" >> $GITHUB_STEP_SUMMARY
+          echo "- 📏 Context Length Handling" >> $GITHUB_STEP_SUMMARY
+          echo "- 🔤 RTL Text Processing" >> $GITHUB_STEP_SUMMARY
+          echo "- 🌍 Cultural Awareness" >> $GITHUB_STEP_SUMMARY
+          echo "- 🔄 Cross-lingual Consistency" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### Quality Thresholds" >> $GITHUB_STEP_SUMMARY
+          echo "- Minimum Overall Score: 0.6" >> $GITHUB_STEP_SUMMARY
+          echo "- Minimum Accuracy: 0.7" >> $GITHUB_STEP_SUMMARY
+          echo "- Minimum Semantic Score: 0.6" >> $GITHUB_STEP_SUMMARY
+          echo "- Maximum Error Rate: 20%" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "*For detailed results, check individual job outputs and artifacts*" >> $GITHUB_STEP_SUMMARY
+
+  no-agents-found:
+    needs: detect-agents
+    if: needs.detect-agents.outputs.has-agents == 'false'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: No agents to evaluate
+        run: |
+          echo "ℹ️ No agent files found to evaluate"
+          echo "This can happen when:"
+          echo "- No Python files were changed in agents/ or submissions/ directories"
+          echo "- Changed files don't contain valid agent implementations"
+          echo "- This is a documentation-only change"
+          echo ""
+          echo "If you expected agents to be evaluated, please check:"
+          echo "1. Agent files are in the correct directories (agents/ or submissions/)"
+          echo "2. Agent files have .py extension"
+          echo "3. Agent files were actually modified in this PR/push"
+          
+          echo "## ℹ️ No Agents Found" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "No agent files were detected for evaluation in this change." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Possible reasons:**" >> $GITHUB_STEP_SUMMARY
+          echo "- No Python files changed in \`agents/\` or \`submissions/\` directories" >> $GITHUB_STEP_SUMMARY
+          echo "- Documentation-only changes" >> $GITHUB_STEP_SUMMARY
+          echo "- Configuration changes only" >> $GITHUB_STEP_SUMMARY
+        
