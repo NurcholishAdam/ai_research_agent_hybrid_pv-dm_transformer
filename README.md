@@ -692,12 +692,13 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 For questions, issues, or contributions:
 
-- 📧 Email: [support@hybrid-ai-research.com](mailto:support@hybrid-ai-research.com)
-- 🐛 Issues: [GitHub Issues](https://github.com/your-repo/issues)
-- 💬 Discussions: [GitHub Discussions](https://github.com/your-repo/discussions)
+- 📧 Email: [nurcholisadam@gmail.com.com](mailto:support@hybrid-ai-research.com)
+- 🐛 Issues: [GitHub Issues](https://github.com/ai_research_agent_hybrid_pv-dm_transformer/hybridAI)
+- 💬 Discussions: [GitHub Discussions](https://github.com/ai_research_agent_hybrid_pv-dm_transformer/discussions)
 
 ---
 
 **Built with ❤️ for the AI Research Community**
 
-*Advancing the state of AI research through hybrid architectures and intelligent integration.*
+
+*Advancing the state of AI Research Agent through hybrid architectures and intelligent integration.*
