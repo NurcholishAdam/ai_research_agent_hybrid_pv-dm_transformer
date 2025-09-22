@@ -694,7 +694,7 @@ For questions, issues, or contributions:
 
 - 📧 Email: [nurcholisadam@gmail.com](mailto:nurcholisadam@gmail.com)
 - 🐛 Issues: [GitHub Issues](https://github.com/ai_research_agent_hybrid_pv-dm_transformer/issues)
-- 💬 Discussions: [GitHub Discussions]([https://github.com/ai_research_agent_hybrid_pv-dm_transformer/discussions])
+- 💬 Discussions: [GitHub Discussions](https://github.com/NurcholishAdam/ai_research_agent_hybrid_pv-dm_transformer/discussions)
 
 ---
 
@@ -702,6 +702,7 @@ For questions, issues, or contributions:
 
 
 *Advancing the state of AI Research Agent through hybrid architectures and intelligent integration.*
+
 
 
 
