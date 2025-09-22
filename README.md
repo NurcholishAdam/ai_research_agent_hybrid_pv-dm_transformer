@@ -686,14 +686,14 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **Transformers** for contextual understanding
 - **NetworkX** for graph operations
 - **FAISS** for efficient similarity search
-- **Social Science Research Community** for methodological guidance
+- **AI Research Agent Team & Social Science Research Community** for methodological guidance
 
 ## 📞 Support
 
 For questions, issues, or contributions:
 
-- 📧 Email: [nurcholisadam@gmail.com.com](mailto:support@hybrid-ai-research.com)
-- 🐛 Issues: [GitHub Issues](https://github.com/ai_research_agent_hybrid_pv-dm_transformer/hybridAI)
+- 📧 Email: [nurcholisadam@gmail.com](mailto:nurcholisadam@gmail.com)
+- 🐛 Issues: [GitHub Issues](https://github.com/ai_research_agent_hybrid_pv-dm_transformer/issues)
 - 💬 Discussions: [GitHub Discussions](https://github.com/ai_research_agent_hybrid_pv-dm_transformer/discussions)
 
 ---
@@ -702,3 +702,4 @@ For questions, issues, or contributions:
 
 
 *Advancing the state of AI Research Agent through hybrid architectures and intelligent integration.*
+
